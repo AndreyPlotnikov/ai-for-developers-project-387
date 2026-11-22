@@ -102,7 +102,7 @@ jobs:
               cat "$RUNNER_TEMP/review/$file"
             done
           } > "$RUNNER_TEMP/review/prompt.txt"
-          .github/opencode-review/node_modules/.bin/opencode run --model "$OPENCODE_MODEL" "$(cat "$RUNNER_TEMP/review/prompt.txt")" > "$RUNNER_TEMP/review/result.txt"
+          .github/opencode-review/node_modules/.bin/opencode run --model "$OPENCODE_MODEL" < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/result.txt"
           test -s "$RUNNER_TEMP/review/result.txt"
       - name: Publish review
         env:
