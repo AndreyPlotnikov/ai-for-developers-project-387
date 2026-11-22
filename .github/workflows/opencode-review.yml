@@ -34,6 +34,24 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
+      - name: Bootstrap review files when absent from base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          if [[ ! -f .github/opencode-review/package-lock.json ]]; then
+            mkdir -p .github/opencode-review
+            for file in package.json package-lock.json; do
+              gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/.github/opencode-review/$file?ref=$HEAD_SHA" > ".github/opencode-review/$file"
+            done
+            printf '%s  %s\n' \
+              82cc2e18be5e434b5ff169f1d6bd1005fceb5baaf2714293f62b49b3f3c15415 .github/opencode-review/package.json \
+              93a6d722503f0304ce0a04704c9891aebc021ebce9af961ce39fe768f6c2eaa6 .github/opencode-review/package-lock.json | sha256sum --check
+          fi
+          if [[ ! -f REVIEW.md ]]; then
+            gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/REVIEW.md?ref=$HEAD_SHA" > REVIEW.md
+          fi
       - name: Gather review evidence
         env:
           GH_TOKEN: ${{ github.token }}
