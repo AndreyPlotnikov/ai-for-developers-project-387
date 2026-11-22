@@ -102,8 +102,14 @@ jobs:
               cat "$RUNNER_TEMP/review/$file"
             done
           } > "$RUNNER_TEMP/review/prompt.txt"
-          .github/opencode-review/node_modules/.bin/opencode run --model "$OPENCODE_MODEL" < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/result.txt"
-          test -s "$RUNNER_TEMP/review/result.txt"
+          status=0
+          .github/opencode-review/node_modules/.bin/opencode run --model "$OPENCODE_MODEL" < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/result.txt" || status=$?
+          bytes=$(wc -c < "$RUNNER_TEMP/review/result.txt")
+          echo "[DEBUG-review] OpenCode exit=$status, stdout bytes=$bytes"
+          if [[ "$status" -ne 0 ]]; then
+            exit "$status"
+          fi
+          test "$bytes" -gt 0
       - name: Publish review
         env:
           GH_TOKEN: ${{ github.token }}
