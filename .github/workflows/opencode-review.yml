@@ -123,6 +123,10 @@ jobs:
           evidence = Path(os.environ["RUNNER_TEMP"]) / "review"
           head = os.environ["HEAD_SHA"]
           diff = (evidence / "diff.txt").read_text(errors="replace")
+          # Temporary diagnostic inputs. Follow the production prompt order.
+          stages = evidence / "stages"
+          stages.mkdir()
+          (stages / "00-short.txt").write_text("Reply with exactly REVIEW_OK.\n")
           # Keep policy and diff ahead of optional context. Each source has its own budget.
           def bounded(value, limit):
               if len(value) <= limit:
@@ -136,15 +140,19 @@ jobs:
               "Если подтверждённых замечаний нет, скажите об этом прямо. "
               "Используйте предоставленные материалы и не запрашивайте инструменты."
           )
-          sections = [
-              instructions, f"Head SHA: {head}", Path("REVIEW.md").read_text(),
-              "Diff:\n" + bounded(diff, 45000),
-          ]
+          sections = [instructions, f"Head SHA: {head}"]
+
+          def add_section(label, content):
+              sections.append(content)
+              (stages / f"{len(sections) - 2:02d}-{label}.txt").write_text("\n\n".join(sections))
+
+          add_section("criteria", Path("REVIEW.md").read_text())
+          add_section("diff", "Diff:\n" + bounded(diff, 45000))
           for name, limit in [
               ("pr.json", 6000), ("issues.txt", 32000), ("checks.json", 4000),
               ("status.json", 2000), ("check-runs.json", 4000), ("line-comments.json", 4000),
           ]:
-              sections.append(name + ":\n" + bounded((evidence / name).read_text(errors="replace"), limit))
+              add_section(name, name + ":\n" + bounded((evidence / name).read_text(errors="replace"), limit))
           # Read Git blobs as data. Avoid following symlinks or reading local runner files.
           files = subprocess.check_output(
               ["git", "-C", "review-head", "ls-tree", "-rz", head]
@@ -175,12 +183,32 @@ jobs:
                       content += "\n[Начало файла; остальная часть пропущена.]"
                   context.append(json.dumps(path, ensure_ascii=False) + ":\n" + content)
           if context:
-              sections.append("Файлы head (ограниченная выборка):\n" + bounded("\n\n".join(context), 18000))
+              add_section("head-files", "Файлы head (ограниченная выборка):\n" + bounded("\n\n".join(context), 18000))
           (evidence / "prompt.txt").write_text("\n\n".join(sections))
           PY
-          timeout --kill-after=15s 5m .github/opencode-review/node_modules/.bin/opencode run \
-            --pure --format json --model "$OPENCODE_MODEL" \
-            < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/events.jsonl"
+          stages=("$RUNNER_TEMP"/review/stages/*.txt)
+          for input in "${stages[@]}"; do
+            stage=${input##*/}
+            limit=75s
+            if [[ "$input" == "${stages[-1]}" ]]; then limit=5m; fi
+            start=$SECONDS
+            status=0
+            timeout --kill-after=5s "$limit" .github/opencode-review/node_modules/.bin/opencode run \
+              --pure --format json --model "$OPENCODE_MODEL" \
+              < "$input" > "$RUNNER_TEMP/review/events.jsonl" || status=$?
+            if ! stats=$(jq -cs '
+              {events: (map(.type) | group_by(.) | map({type: .[0], count: length})),
+               errorNames: [ .[] | select(.type == "error") | .error.name ],
+               hasText: any(.[]; .type == "text" and ((.part.text // "") | test("\\S")))}
+            ' "$RUNNER_TEMP/review/events.jsonl"); then
+              stats='{"hasText":false,"invalidJson":true}'
+            fi
+            echo "[DEBUG-review] stage=$stage seconds=$((SECONDS - start)) exit=$status $stats"
+            if [[ "$status" -ne 0 ]] || ! jq -e '.hasText and (.errorNames | length == 0)' <<< "$stats" >/dev/null; then
+              echo "::error::Диагностика остановилась на этапе $stage."
+              exit 1
+            fi
+          done
           if ! jq --exit-status --raw-output --slurp '
             if any(.[]; .type == "error") then error("OpenCode reported a session error") else
               [ .[] | select(.type == "text") | .part.text | strings ] | join("\n\n")
