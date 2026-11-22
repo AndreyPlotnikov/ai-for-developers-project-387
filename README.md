@@ -83,6 +83,29 @@ mise run setup
 
 `setup` устанавливает зависимости по lockfile и Git-хук pre-commit. Для установки только зависимостей используйте `mise run install`. Запускайте команды через `mise exec --`, если mise не активирован в оболочке.
 
+## OpenCode в GitHub
+
+Workflow [opencode.yml](.github/workflows/opencode.yml) вызывает официальную GitHub-интеграцию OpenCode (пока документирована как V1) из комментариев к issues, PR и строкам diff. Используется провайдер OpenCode Zen, а не подписка локальной сессии.
+
+Перед первым запуском:
+
+1. Установите [GitHub App opencode-agent](https://github.com/apps/opencode-agent/installations/new), выбрав **Only select repositories → ai-for-developers-project-387**. Проверьте запрашиваемые разрешения и подтвердите установку.
+2. В [консоли OpenCode](https://opencode.ai/console) создайте API-ключ. В [Actions secrets](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/settings/secrets/actions) добавьте repository secret `OPENCODE_API_KEY`. Не публикуйте ключ в комментариях или Git. Для платных моделей нужны средства на балансе; настройте бюджет в консоли.
+3. Выберите доступную вашему аккаунту модель Zen (`opencode models opencode` в CLI V1) и сохраните её полный ID `opencode/<model-id>` в repository variable `OPENCODE_MODEL` в [Actions variables](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/settings/variables/actions).
+4. Доставьте workflow в ветку `main`: событие `issue_comment` использует workflow из основной ветки. До этого вызовы из комментариев не работают.
+
+Для проверки оставьте отдельный комментарий в issue:
+
+```text
+/oc Объясни эту задачу и предложи план. Не изменяй файлы.
+```
+
+Команда `/oc` или `/opencode` должна начинать строку (регистр неважен). Вызов разрешён только людям с текущими правами `write`, `maintain` или `admin`; боты и пользователи без этих прав не получают доступ к секрету и OIDC. Проверьте запуск **OpenCode** во вкладке Actions и ответ приложения в обсуждении.
+
+В issue агент может создать ветку и PR; в PR — отправить изменения в его ветку. Перед вызовом на PR проверьте код, особенно из форка: агент выполняет команды с доступом к API-ключу и токену приложения. Проверка прав автора комментария не защищает от вредоносного содержимого задачи или PR. Начальный checkout берётся из основной ветки, но агент может переключиться на ветку PR.
+
+`GITHUB_TOKEN` имеет только `contents: read`; право `id-token: write` нужно для обмена OIDC на токен GitHub App, которым агент отвечает и отправляет изменения. Публичный шаринг сессий отключён, время запуска ограничено 45 минутами. Перед изменениями агент читает `AGENTS.md`, включая требование `mise run check`; инструменты и зависимости проекта устанавливаются workflow.
+
 ## Проверки
 
 ```bash
