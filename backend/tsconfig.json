@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "ESNext.Temporal"],
+    "module": "NodeNext",
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "types": ["node"],
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "noEmitOnError": true
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,0 +1,31 @@
+name: Checks
+
+# Both events are required: every push must be checked, including branches without a PR.
+# jactionlint ignore=duplicate-triggers
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5
+        with:
+          version: 2026.10.25
+      - run: mise run install
+      - run: pnpm --dir frontend exec playwright install-deps chromium-headless-shell
+      - run: mise run check

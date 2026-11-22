@@ -1,0 +1,46 @@
+{
+  "name": "call-calendar-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:openapi": "tsp compile api",
+    "generate:server": "orval --config orval.config.ts",
+    "generate": "pnpm run generate:openapi && pnpm run generate:server",
+    "dev": "pnpm run generate && tsx watch src/index.ts",
+    "test:e2e-server": "tsx tests/e2e-server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm run generate && tsc",
+    "start": "node dist/index.js",
+    "lint": "oxlint --deny-warnings .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check ."
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.6",
+    "@hono/zod-validator": "0.9.1",
+    "hono": "4.13.16",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
+    "@types/node": "26.6.6",
+    "@typespec/compiler": "1.17.0",
+    "@typespec/http": "1.17.0",
+    "@typespec/openapi3": "1.17.0",
+    "dependency-cruiser": "18.7.2",
+    "knip": "6.43.0",
+    "orval": "8.46.0",
+    "oxfmt": "0.76.0",
+    "oxlint": "1.91.0",
+    "tsx": "4.23.0",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": ">=26.13.0 <27",
+    "pnpm": "10.11.0"
+  },
+  "packageManager": "pnpm@10.11.0"
+}
