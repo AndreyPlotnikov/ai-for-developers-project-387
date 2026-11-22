@@ -1,5 +1,10 @@
 name: OpenCode
 
+# Immutable Actions run metadata is the budget ledger. Non-command runs have a
+# different title; candidate commands are counted conservatively before auth.
+run-name: >-
+  ${{ ((github.event.issue.pull_request && github.event.issue.number) || github.event.pull_request.number) && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode')) && format('pr-budget-{0}', github.event.issue.number || github.event.pull_request.number) || 'other-comment' }}
+
 on:
   # Human-approved exception: comment invocation requires Zen secrets and App OIDC.
   # The secret-free authorize job checks the commenter's current write permission.
@@ -49,10 +54,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
+      actions: read
       contents: read
       id-token: write
+    outputs:
+      budget: ${{ steps.budget.outputs.reason }}
+      setup: ${{ steps.setup.outcome }}
+      agent: ${{ steps.agent.outcome }}
+      agent_reason: ${{ steps.agent.outputs.reason }}
     steps:
+      - name: Enforce PR budget before every agent attempt
+        id: budget
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const pr = context.payload.pull_request?.number || (context.payload.issue?.pull_request && context.payload.issue.number);
+            if (!pr) { core.setOutput('reason', 'ok'); return; }
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              ...context.repo, workflow_id: 'opencode.yml', per_page: 100,
+            });
+            const candidates = runs.filter(run => run.name === `pr-budget-${pr}` || run.display_title === `pr-budget-${pr}`);
+            if (!candidates.some(run => run.id === context.runId)) throw new Error('Current run missing from budget ledger');
+            const count = candidates.reduce((sum, run) => sum + run.run_attempt, 0);
+            core.info(`PR #${pr}: ${count} candidate attempts including current, limit 3`);
+            core.setOutput('reason', count > 3 ? 'limit_exhausted' : 'ok');
       - name: Validate Zen configuration
+        id: setup
+        if: steps.budget.outputs.reason == 'ok'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
@@ -66,22 +94,73 @@ jobs:
             exit 1
           fi
       - name: Checkout trusted default branch
+        if: steps.budget.outputs.reason == 'ok'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 1
           persist-credentials: false
-      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5
+      - if: steps.budget.outputs.reason == 'ok'
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5
         with:
           version: 2026.10.25
-      - run: mise run install
-      - run: pnpm --dir frontend exec playwright install-deps chromium-headless-shell
+      - if: steps.budget.outputs.reason == 'ok'
+        run: mise run install
+      - if: steps.budget.outputs.reason == 'ok'
+        run: pnpm --dir frontend exec playwright install-deps chromium-headless-shell
+      - name: Install pinned OpenCode CLI
+        if: steps.budget.outputs.reason == 'ok'
+        run: npm ci --prefix .github/opencode-review
       - name: Run OpenCode
-        uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a
+        id: agent
+        if: steps.budget.outputs.reason == 'ok'
+        timeout-minutes: 37
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_PERMISSION: '{"external_directory":"deny"}'
+          MODEL: ${{ vars.OPENCODE_MODEL }}
+          MENTIONS: /opencode,/oc
+          SHARE: 'false'
+        run: |
+          set +e
+          timeout 35m .github/opencode-review/node_modules/.bin/opencode github run
+          status=$?
+          if [[ $status -eq 124 ]]; then
+            echo 'reason=timeout' >> "$GITHUB_OUTPUT"
+          elif [[ $status -ne 0 ]]; then
+            echo 'reason=agent_failed' >> "$GITHUB_OUTPUT"
+          else
+            echo 'reason=ok' >> "$GITHUB_OUTPUT"
+          fi
+          exit "$status"
+
+  report:
+    needs: [authorize, opencode]
+    if: >-
+      always() && needs.authorize.outputs.allowed == 'true' &&
+      (github.event.pull_request.number || github.event.issue.pull_request) &&
+      needs.opencode.result != 'success' ||
+      (always() && needs.opencode.outputs.budget == 'limit_exhausted')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Report outcome without a model
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          BUDGET: ${{ needs.opencode.outputs.budget }}
+          SETUP: ${{ needs.opencode.outputs.setup }}
+          AGENT: ${{ needs.opencode.outputs.agent }}
+          AGENT_REASON: ${{ needs.opencode.outputs.agent_reason }}
         with:
-          model: ${{ vars.OPENCODE_MODEL }}
-          mentions: /opencode,/oc
-          share: 'false'
+          script: |
+            const pr = context.payload.pull_request?.number || context.payload.issue.number;
+            const current = await github.rest.pulls.get({ ...context.repo, pull_number: pr });
+            let reason = 'infra';
+            if (process.env.BUDGET === 'limit_exhausted') reason = 'limit_exhausted';
+            else if (process.env.AGENT_REASON === 'timeout') reason = 'timeout';
+            else if (process.env.AGENT === 'failure') reason = 'agent_failed';
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}/attempts/${context.runAttempt}`;
+            await github.rest.issues.createComment({ ...context.repo, issue_number: pr,
+              body: `Нужен человек: **${reason}**. Текущий head SHA: ${current.data.head.sha}. [Логи запуска](${url}). Неопределённую причину проверьте по логам.` });
