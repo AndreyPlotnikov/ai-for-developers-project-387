@@ -46,14 +46,14 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
-          if [[ ! -f .github/opencode-review/package-lock.json ]]; then
-            mkdir -p .github/opencode-review
+          if [[ ! -f .github/opencode-review-v2/package-lock.json ]]; then
+            mkdir -p .github/opencode-review-v2
             for file in package.json package-lock.json; do
-              gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/.github/opencode-review/$file?ref=$HEAD_SHA" > ".github/opencode-review/$file"
+              gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/.github/opencode-review-v2/$file?ref=$HEAD_SHA" > ".github/opencode-review-v2/$file"
             done
             printf '%s  %s\n' \
-              82cc2e18be5e434b5ff169f1d6bd1005fceb5baaf2714293f62b49b3f3c15415 .github/opencode-review/package.json \
-              93a6d722503f0304ce0a04704c9891aebc021ebce9af961ce39fe768f6c2eaa6 .github/opencode-review/package-lock.json | sha256sum --check
+              f3a6d41ea0773844f2e81312947118c70321b61b93a3274d3de5e23417dba765 .github/opencode-review-v2/package.json \
+              1694f645df1b44b2cc2cfaa1793d23f2802541dc6daad639199df8c34e20640b .github/opencode-review-v2/package-lock.json | sha256sum --check
           fi
           if [[ ! -f REVIEW.md ]]; then
             gh api -H 'Accept: application/vnd.github.raw+json' "repos/$GITHUB_REPOSITORY/contents/REVIEW.md?ref=$HEAD_SHA" > REVIEW.md
@@ -71,6 +71,12 @@ jobs:
           test "$(gh pr view "$PR" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
           gh pr diff "$PR" > "$RUNNER_TEMP/review/diff.txt"
           test "$(gh pr view "$PR" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          # Preserve the exact PR #10 comparison that first timed out.
+          if [[ "$PR" == 10 ]]; then
+            gh api -H 'Accept: application/vnd.github.diff' \
+              "repos/$GITHUB_REPOSITORY/compare/d5485b6628ffabd6a2bfcabc0eddfb4b27629194...10aac3220cfe83e56723782e18c5e8cded6ab537" \
+              > "$RUNNER_TEMP/review/reproducing-diff.txt"
+          fi
           gh pr checks "$PR" --json name,state,link,bucket > "$RUNNER_TEMP/review/checks.json" || true
           gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status" > "$RUNNER_TEMP/review/status.json"
           gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs" > "$RUNNER_TEMP/review/check-runs.json"
@@ -104,12 +110,11 @@ jobs:
                   out.write(f'\n#{number} {comment["url"]}\n{comment["body"][:1000]}\n')
           PY
       - name: Install OpenCode CLI
-        run: npm ci --prefix .github/opencode-review
+        run: npm ci --prefix .github/opencode-review-v2
       - name: Review without writing files or running commands
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
-          OPENCODE_PERMISSION: '{"*":"deny"}'
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
@@ -123,10 +128,6 @@ jobs:
           evidence = Path(os.environ["RUNNER_TEMP"]) / "review"
           head = os.environ["HEAD_SHA"]
           diff = (evidence / "diff.txt").read_text(errors="replace")
-          # Temporary diagnostic inputs. Follow the production prompt order.
-          stages = evidence / "stages"
-          stages.mkdir()
-          (stages / "00-short.txt").write_text("Reply with exactly REVIEW_OK.\n")
           # Keep policy and diff ahead of optional context. Each source has its own budget.
           def bounded(value, limit):
               if len(value) <= limit:
@@ -140,19 +141,34 @@ jobs:
               "Если подтверждённых замечаний нет, скажите об этом прямо. "
               "Используйте предоставленные материалы и не запрашивайте инструменты."
           )
-          sections = [instructions, f"Head SHA: {head}"]
-
-          def add_section(label, content):
-              sections.append(content)
-              (stages / f"{len(sections) - 2:02d}-{label}.txt").write_text("\n\n".join(sections))
-
-          add_section("criteria", Path("REVIEW.md").read_text())
-          add_section("diff", "Diff:\n" + bounded(diff, 45000))
+          criteria = Path("REVIEW.md").read_text()
+          reproduction = evidence / "reproducing-diff.txt"
+          if reproduction.exists():
+              probes = evidence / "probes"
+              probes.mkdir()
+              previous_sha = "10aac3220cfe83e56723782e18c5e8cded6ab537"
+              prefix = "\n\n".join([instructions, f"Head SHA: {previous_sha}", criteria])
+              original = bounded(reproduction.read_text(errors="replace"), 45000)
+              midpoint = len(original) // 2
+              # Match line lengths and total character count without retaining PR text.
+              words = "The sample record contains a time slot and a calendar label. "
+              control = "\n".join(
+                  (words * (len(line) // len(words) + 1))[:len(line)] for line in original.split("\n")
+              )
+              for name, material in [
+                  ("00-criteria", None), ("01-first-2k", original[:2000]),
+                  ("02-middle-2k", original[midpoint - 1000:midpoint + 1000]),
+                  ("03-last-2k", original[-2000:]), ("04-first-half", original[:midpoint]),
+                  ("05-neutral-full", control), ("06-original-full", original),
+              ]:
+                  prompt = prefix if material is None else prefix + "\n\nDiff:\n" + material
+                  (probes / f"{name}.txt").write_text(prompt)
+          sections = [instructions, f"Head SHA: {head}", criteria, "Diff:\n" + bounded(diff, 45000)]
           for name, limit in [
               ("pr.json", 6000), ("issues.txt", 32000), ("checks.json", 4000),
               ("status.json", 2000), ("check-runs.json", 4000), ("line-comments.json", 4000),
           ]:
-              add_section(name, name + ":\n" + bounded((evidence / name).read_text(errors="replace"), limit))
+              sections.append(name + ":\n" + bounded((evidence / name).read_text(errors="replace"), limit))
           # Read Git blobs as data. Avoid following symlinks or reading local runner files.
           files = subprocess.check_output(
               ["git", "-C", "review-head", "ls-tree", "-rz", head]
@@ -183,35 +199,47 @@ jobs:
                       content += "\n[Начало файла; остальная часть пропущена.]"
                   context.append(json.dumps(path, ensure_ascii=False) + ":\n" + content)
           if context:
-              add_section("head-files", "Файлы head (ограниченная выборка):\n" + bounded("\n\n".join(context), 18000))
+              sections.append("Файлы head (ограниченная выборка):\n" + bounded("\n\n".join(context), 18000))
           (evidence / "prompt.txt").write_text("\n\n".join(sections))
           PY
-          stages=("$RUNNER_TEMP"/review/stages/*.txt)
-          for input in "${stages[@]}"; do
+          # V2 uses ordered permissions in configuration, not OPENCODE_PERMISSION.
+          # Run outside the checkout so repository configuration and plugins are not loaded.
+          mkdir -p "$RUNNER_TEMP/review/isolated" "$RUNNER_TEMP/review/config"
+          printf '%s\n' '{"permissions":[{"action":"*","resource":"*","effect":"deny"}]}' > "$RUNNER_TEMP/review/isolated/opencode.json"
+          export XDG_CONFIG_HOME="$RUNNER_TEMP/review/config"
+          cd "$RUNNER_TEMP/review/isolated"
+          shopt -s nullglob
+          original_ok=true
+          for input in "$RUNNER_TEMP"/review/probes/*.txt; do
             stage=${input##*/}
-            limit=75s
-            if [[ "$input" == "${stages[-1]}" ]]; then limit=5m; fi
             start=$SECONDS
             status=0
-            timeout --kill-after=5s "$limit" .github/opencode-review/node_modules/.bin/opencode run \
-              --pure --format json --model "$OPENCODE_MODEL" \
+            timeout --kill-after=5s 75s "$GITHUB_WORKSPACE/.github/opencode-review-v2/node_modules/.bin/opencode" run \
+              --standalone --format json --model "$OPENCODE_MODEL" \
               < "$input" > "$RUNNER_TEMP/review/events.jsonl" || status=$?
             if ! stats=$(jq -cs '
               {events: (map(.type) | group_by(.) | map({type: .[0], count: length})),
-               errorNames: [ .[] | select(.type == "error") | .error.name ],
+               errorNames: [ .[] | select(.type == "error") | (.error.type // .error.name // "unknown") ],
                hasText: any(.[]; .type == "text" and ((.part.text // "") | test("\\S")))}
             ' "$RUNNER_TEMP/review/events.jsonl"); then
               stats='{"hasText":false,"invalidJson":true}'
             fi
-            echo "[DEBUG-review] stage=$stage seconds=$((SECONDS - start)) exit=$status $stats"
-            if [[ "$status" -ne 0 ]] || ! jq -e '.hasText and (.errorNames | length == 0)' <<< "$stats" >/dev/null; then
-              echo "::error::Диагностика остановилась на этапе $stage."
-              exit 1
+            echo "[DEBUG-review] stage=$stage bytes=$(wc -c < "$input") seconds=$((SECONDS - start)) exit=$status $stats"
+            if [[ "$stage" == 06-original-full.txt ]] &&
+              { [[ "$status" -ne 0 ]] || ! jq -e '.hasText and (.errorNames | length == 0)' <<< "$stats" >/dev/null; }; then
+              original_ok=false
             fi
           done
+          if [[ "$original_ok" == false ]]; then
+            echo '::error::Исходный diff снова не получил ответа за время диагностической пробы.'
+            exit 1
+          fi
+          timeout --kill-after=15s 5m "$GITHUB_WORKSPACE/.github/opencode-review-v2/node_modules/.bin/opencode" run \
+            --standalone --format json --model "$OPENCODE_MODEL" \
+            < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/events.jsonl"
           if ! jq --exit-status --raw-output --slurp '
             if any(.[]; .type == "error") then error("OpenCode reported a session error") else
-              [ .[] | select(.type == "text") | .part.text | strings ] | join("\n\n")
+              [ .[] | select(.type == "text") | .part.text | strings ] | join("")
               | select(test("\\S"))
             end
           ' "$RUNNER_TEMP/review/events.jsonl" > "$RUNNER_TEMP/review/result.txt"; then
