@@ -15,6 +15,7 @@ test('workflows register their intended LiteLLM models without embedding a key',
     assert.equal(config.provider.litellm_ott.options.baseURL, 'https://litellm.twiket.com/v1');
     assert.equal(config.provider.litellm_ott.options.apiKey, '{env:LITELLM_API_KEY}');
     assert.equal(config.provider.litellm_ott.models[model].tool_call, true);
+    assert.equal(config.small_model, `litellm_ott/${model}`);
     assert.match(workflow, /MODEL: litellm_ott\/gpt-6-luna/);
     const agentStep = workflow.split('- name: Run OpenCode')[1];
     assert.ok(agentStep, `${path} has an agent step`);
