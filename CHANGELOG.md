@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/compare/v1.1.0...v1.1.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* исключить зависимости из коммитов ([#13](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/issues/13)) ([dfe3af4](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/commit/dfe3af4b19a0085a5d6fa136e13391492b6213f7))
+
 ## [1.1.0](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/compare/v1.0.0...v1.1.0) (2026-11-28)
 
 
