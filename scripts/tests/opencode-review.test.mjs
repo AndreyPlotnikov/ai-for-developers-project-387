@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-test('all workflows register the same LiteLLM model without embedding a key', () => {
-  const model = 'gpt-6.1-terra';
+test('workflows register their intended LiteLLM models without embedding a key', () => {
+  const model = 'gpt-6-luna';
   for (const path of ['.github/workflows/opencode.yml', '.github/workflows/opencode-triage.yml']) {
     const workflow = readFileSync(path, 'utf8');
     const match = workflow.match(/OPENCODE_CONFIG_CONTENT: >-\n\s+(\{[^\n]+\})/);
@@ -15,7 +15,8 @@ test('all workflows register the same LiteLLM model without embedding a key', ()
     assert.equal(config.provider.litellm_ott.options.baseURL, 'https://litellm.twiket.com/v1');
     assert.equal(config.provider.litellm_ott.options.apiKey, '{env:LITELLM_API_KEY}');
     assert.equal(config.provider.litellm_ott.models[model].tool_call, true);
-    assert.match(workflow, /MODEL: litellm_ott\/gpt-6\.1-terra/);
+    assert.equal(config.small_model, `litellm_ott/${model}`);
+    assert.match(workflow, /MODEL: litellm_ott\/gpt-6-luna/);
     const agentStep = workflow.split('- name: Run OpenCode')[1];
     assert.ok(agentStep, `${path} has an agent step`);
     assert.match(agentStep.split(/\n {6}- /)[0], /LITELLM_API_KEY: \$\{\{ secrets\.LITELLM_API_KEY \}\}/);
@@ -26,7 +27,7 @@ test('all workflows register the same LiteLLM model without embedding a key', ()
   const provider = JSON.parse(configText).providers.litellm_ott;
   assert.equal(provider.settings.baseURL, 'https://litellm.twiket.com/v1');
   assert.deepEqual(provider.env, ['LITELLM_API_KEY']);
-  assert.equal(provider.models[model].capabilities.tools, true);
+  assert.equal(provider.models['gpt-6.1-terra'].capabilities.tools, true);
   assert.match(workflow, /launcher\.py litellm_ott\/gpt-6\.1-terra/);
 });
 

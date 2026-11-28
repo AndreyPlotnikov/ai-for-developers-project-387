@@ -53,9 +53,9 @@ jobs:
         env:
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           OPENCODE_CONFIG_CONTENT: >-
-            {"provider":{"litellm_ott":{"name":"litellm_ott","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://litellm.twiket.com/v1","apiKey":"{env:LITELLM_API_KEY}"},"models":{"gpt-6.1-terra":{"name":"gpt-6.1-terra","tool_call":true,"reasoning":true,"limit":{"context":922000,"output":128000}}}}},"small_model":"litellm_ott/gpt-6.1-terra"}
+            {"provider":{"litellm_ott":{"name":"litellm_ott","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://litellm.twiket.com/v1","apiKey":"{env:LITELLM_API_KEY}"},"models":{"gpt-6-luna":{"name":"gpt-6-luna","tool_call":true,"reasoning":true,"limit":{"context":922000,"output":128000}}}}},"small_model":"litellm_ott/gpt-6-luna"}
           OPENCODE_PERMISSION: '{"external_directory":"deny"}'
-          MODEL: litellm_ott/gpt-6.1-terra
+          MODEL: litellm_ott/gpt-6-luna
           SHARE: 'false'
           PROMPT: |
             Выполни предварительный разбор нового issue по скиллу triage.
