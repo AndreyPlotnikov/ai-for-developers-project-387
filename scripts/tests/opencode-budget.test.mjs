@@ -29,3 +29,32 @@ test('does not charge another PR', async () => {
 test('fails closed if current run is missing', async () => {
   await assert.rejects(evaluate([run(1, 1)]), /missing from budget ledger/);
 });
+
+test('authorizes commands only for trusted users and non-fork PRs', async () => {
+  const authorization = workflow.match(/name: Check command and repository permission[\s\S]*?script: \|\n((?: {12}.+\n|\n)+)/);
+  assert.ok(authorization, 'authorization script is present in workflow');
+  const script = authorization[1].replace(/^ {12}/gm, '');
+  const runAuthorization = new Function('context', 'github', 'core', `return (async () => { ${script} })()`);
+  async function authorize({ body = '/oc explain', permission = 'write', head, event = 'issue' } = {}) {
+    const outputs = {};
+    const payload = { comment: { body } };
+    if (head !== undefined) {
+      if (event === 'review') payload.pull_request = { number: 42 };
+      else payload.issue = { number: 42, pull_request: {} };
+    } else payload.issue = { number: 42 };
+    const context = { payload, repo: { owner: 'owner', repo: 'repo' } };
+    const github = { rest: {
+      pulls: { get: async () => ({ data: { head: { repo: head === null ? null : { full_name: head } } } }) },
+      repos: { getCollaboratorPermissionLevel: async () => ({ data: { permission } }) },
+    } };
+    context.payload.comment.user = { login: 'user' };
+    await runAuthorization(context, github, { setOutput: (key, value) => { outputs[key] = value; } });
+    return outputs.allowed;
+  }
+  assert.equal(await authorize(), true);
+  assert.equal(await authorize({ permission: 'read' }), false);
+  assert.equal(await authorize({ body: 'text /oc explain' }), 'false');
+  assert.equal(await authorize({ head: 'owner/repo' }), true);
+  assert.equal(await authorize({ head: 'fork/repo' }), 'false');
+  assert.equal(await authorize({ head: null, event: 'review' }), 'false');
+});

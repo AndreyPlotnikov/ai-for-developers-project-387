@@ -6,7 +6,7 @@ run-name: >-
   ${{ ((github.event.issue.pull_request && github.event.issue.number) || github.event.pull_request.number) && (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode')) && format('pr-budget-{0}', github.event.issue.number || github.event.pull_request.number) || 'other-comment' }}
 
 on:
-  # Human-approved exception: comment invocation requires Zen secrets and App OIDC.
+  # Human-approved exception: comment invocation requires a model secret and App OIDC.
   # The secret-free authorize job checks the commenter's current write permission.
   # PR code is still untrusted: maintainers must review it before invoking the agent.
   # jactionlint ignore=dangerous-triggers
@@ -29,6 +29,8 @@ jobs:
        contains(github.event.comment.body, '/opencode'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      pull-requests: read
     outputs:
       allowed: ${{ steps.permission.outputs.allowed }}
     steps:
@@ -41,6 +43,15 @@ jobs:
             if (!/^\/(?:opencode|oc)(?=\s|$)/im.test(comment.body)) {
               core.setOutput('allowed', 'false');
               return;
+            }
+            const prNumber = context.payload.pull_request?.number ||
+              (context.payload.issue?.pull_request && context.payload.issue.number);
+            if (prNumber) {
+              const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: prNumber });
+              if (pr.head.repo?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+                core.setOutput('allowed', 'false');
+                return;
+              }
             }
             const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
               ...context.repo,
@@ -57,6 +68,7 @@ jobs:
       actions: read
       contents: read
       id-token: write
+      issues: write
     outputs:
       budget: ${{ steps.budget.outputs.reason }}
       setup: ${{ steps.setup.outcome }}
@@ -78,19 +90,14 @@ jobs:
             const count = candidates.reduce((sum, run) => sum + run.run_attempt, 0);
             core.info(`PR #${pr}: ${count} candidate attempts including current, limit 3`);
             core.setOutput('reason', count > 3 ? 'limit_exhausted' : 'ok');
-      - name: Validate Zen configuration
+      - name: Validate LiteLLM configuration
         id: setup
         if: steps.budget.outputs.reason == 'ok'
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
         run: |
-          if [[ -z "$OPENCODE_API_KEY" ]]; then
-            echo '::error::Set the OPENCODE_API_KEY repository secret.'
-            exit 1
-          fi
-          if [[ ! "$OPENCODE_MODEL" =~ ^opencode/[a-zA-Z0-9._-]+$ ]]; then
-            echo '::error::Set OPENCODE_MODEL to opencode/<model-id> in repository variables.'
+          if [[ -z "$LITELLM_API_KEY" ]]; then
+            echo '::error::Set the LITELLM_API_KEY repository secret.'
             exit 1
           fi
       - name: Checkout trusted default branch
@@ -116,9 +123,12 @@ jobs:
         if: steps.budget.outputs.reason == 'ok'
         timeout-minutes: 37
         env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_CONFIG_CONTENT: >-
+            {"provider":{"litellm_ott":{"name":"litellm_ott","npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://litellm.twiket.com/v1","apiKey":"{env:LITELLM_API_KEY}"},"models":{"gpt-6.1-terra":{"name":"gpt-6.1-terra","tool_call":true,"reasoning":true,"limit":{"context":922000,"output":128000}}}}},"small_model":"litellm_ott/gpt-6.1-terra"}
           OPENCODE_PERMISSION: '{"external_directory":"deny"}'
-          MODEL: ${{ vars.OPENCODE_MODEL }}
+          MODEL: litellm_ott/gpt-6.1-terra
           MENTIONS: /opencode,/oc
           SHARE: 'false'
         run: |
