@@ -255,6 +255,32 @@ jobs:
             -w /review "$REVIEW_IMAGE" \
             python /review/launcher.py litellm_ott/gpt-6.1-terra \
             < "$RUNNER_TEMP/review/prompt.txt" > "$RUNNER_TEMP/review/events.jsonl"; then
+            python3 - <<'PY'
+            import json, os
+            from pathlib import Path
+
+            path = Path(os.environ['RUNNER_TEMP']) / 'review' / 'events.jsonl'
+            for line in path.read_text(errors='replace').splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict) or event.get('type') != 'error':
+                    continue
+                error = event.get('error')
+                if not isinstance(error, dict):
+                    continue
+                name = error.get('name')
+                data = error.get('data')
+                print('Review error category:', name if name in (
+                    'APIError', 'AuthenticationError', 'ProviderAuthError',
+                    'ModelNotFoundError', 'UnknownError', 'MessageOutputLengthError'
+                ) else 'other')
+                if isinstance(data, dict):
+                    status = data.get('statusCode')
+                    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+                        print('Review HTTP status:', status)
+          PY
             if [[ -s "$RUNNER_TEMP/review/container-id" ]]; then
               docker rm -f "$(cat "$RUNNER_TEMP/review/container-id")" >/dev/null 2>&1 || true
             fi
