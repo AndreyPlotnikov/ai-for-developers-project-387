@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/compare/v1.0.0...v1.1.0) (2026-11-28)
+
+
+### Features
+
+* add automatic issue triage ([d5485b6](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/commit/d5485b6628ffabd6a2bfcabc0eddfb4b27629194))
+* использовать LiteLLM в GitHub Actions ([#1](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/issues/1)) ([f11cf3d](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/commit/f11cf3ded65958989c68c2b4411959adf4c28422))
+
+
+### Bug Fixes
+
+* prevent OpenCode permission prompt in CI ([489c59f](https://github.com/AndreyPlotnikov/ai-for-developers-project-387/commit/489c59f65620516193bc8926df807e03dd4d2e2f))
+
 ## 1.0.0 (2026-11-14)
 
 
