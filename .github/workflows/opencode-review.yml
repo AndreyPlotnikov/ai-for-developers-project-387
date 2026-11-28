@@ -280,6 +280,16 @@ jobs:
                   status = data.get('statusCode')
                   if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
                       print('Review HTTP status:', status)
+              text = json.dumps(error).lower()
+              for category, markers in (
+                  ('model unavailable', ('modelnotfound', 'model not found', 'model unavailable')),
+                  ('authentication', ('unauthorized', 'authentication', 'invalid api key', '401', '403')),
+                  ('network', ('connection', 'network', 'fetch failed', 'dns', 'timeout')),
+                  ('provider configuration', ('provider', 'configuration', 'config')),
+                  ('tool or permission', ('permission', 'tool call', 'tool_use')),
+              ):
+                  if any(marker in text for marker in markers):
+                      print('Review error hint:', category)
           PY
             if [[ -s "$RUNNER_TEMP/review/container-id" ]]; then
               docker rm -f "$(cat "$RUNNER_TEMP/review/container-id")" >/dev/null 2>&1 || true
