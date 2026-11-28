@@ -105,6 +105,36 @@ jobs:
           PY
       - name: Install OpenCode CLI
         run: npm ci --prefix .github/opencode-review-v2
+      - name: Check LiteLLM access
+        env:
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.error, urllib.request
+
+          key = os.environ.get('LITELLM_API_KEY', '')
+          if not key:
+              raise SystemExit('LiteLLM secret is missing')
+          for name, url, body in (
+              ('models', 'https://litellm.twiket.com/v1/models', None),
+              ('completion', 'https://litellm.twiket.com/v1/chat/completions',
+               json.dumps({'model': 'gpt-6.1-terra', 'messages': [{'role': 'user', 'content': 'Reply OK'}],
+                           'max_tokens': 16}).encode()),
+          ):
+              request = urllib.request.Request(url, data=body, headers={
+                  'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json',
+              })
+              try:
+                  with urllib.request.urlopen(request, timeout=45) as response:
+                      status = response.status
+              except urllib.error.HTTPError as error:
+                  status = error.code
+              except (urllib.error.URLError, TimeoutError):
+                  raise SystemExit(f'LiteLLM {name}: network error')
+              print(f'LiteLLM {name}: HTTP {status}')
+              if not 200 <= status < 300:
+                  raise SystemExit(1)
+          PY
       - name: Review without writing files or running commands
         env:
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
