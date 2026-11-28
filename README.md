@@ -126,6 +126,8 @@ Workflow [opencode-triage.yml](.github/workflows/opencode-triage.yml) запус
 
 ## Проверки
 
+Каталоги node_modules исключены из Git корневым .gitignore.
+
 ```bash
 mise run check
 ```
