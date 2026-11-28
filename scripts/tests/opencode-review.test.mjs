@@ -16,6 +16,9 @@ test('all workflows register the same LiteLLM model without embedding a key', ()
     assert.equal(config.provider.litellm_ott.options.apiKey, '{env:LITELLM_API_KEY}');
     assert.equal(config.provider.litellm_ott.models[model].tool_call, true);
     assert.match(workflow, /MODEL: litellm_ott\/gpt-6\.1-terra/);
+    const agentStep = workflow.split('- name: Run OpenCode')[1];
+    assert.ok(agentStep, `${path} has an agent step`);
+    assert.match(agentStep.split(/\n {6}- /)[0], /LITELLM_API_KEY: \$\{\{ secrets\.LITELLM_API_KEY \}\}/);
   }
   const workflow = readFileSync('.github/workflows/opencode-review.yml', 'utf8');
   const configText = workflow.split('cat > "$RUNNER_TEMP/review/sandbox/opencode.json" <<\'JSON\'\n')[1]
